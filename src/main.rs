@@ -1,7 +1,10 @@
-use std::{fs::{self, hard_link, File}, path::{Path, PathBuf}, os::unix::fs::symlink, f32::consts::E, process};
+use std::{fs::{self, hard_link}, path::Path, os::unix::fs::symlink, process};
 use clap::{Parser, Subcommand};
-use sha3::{Sha3_256, Digest};
-use serde_json::Value;
+
+use crate::{structure::{get_chroma_dir, get_electron_dir, get_apps_dir, get_flatpak_hash, get_path_hash}, flatpak::{get_flatpak_dir, get_flatpak_replaced_file}};
+
+pub(crate) mod structure;
+pub(crate) mod flatpak;
 
 #[derive(Subcommand)]
 enum Commands {
@@ -19,104 +22,6 @@ enum Commands {
 struct Args {
     #[command(subcommand)]
     command: Commands,
-}
-
-fn get_chroma_dir() -> PathBuf {
-    let chroma_dir = Path::new("/var/lib/chroma/");
-    if !chroma_dir.exists() {
-        println!("Creating chroma directory at {:?}...", chroma_dir);
-        fs::create_dir(&chroma_dir).expect("Failed to create directory .chroma");
-    }
-
-    chroma_dir.to_owned()
-}
-
-fn get_apps_dir<P>(chroma_dir: P) -> PathBuf
-    where P: AsRef<Path>
-{
-    let apps_dir = chroma_dir.as_ref().join("apps");
-    if !apps_dir.exists() {
-        fs::create_dir(&apps_dir).expect("Failed to create directory .chroma/apps");
-    }
-
-    apps_dir
-}
-
-fn get_electron_dir<P>(chroma_dir: P) -> Option<PathBuf>
-    where P: AsRef<Path>
-{
-    let electron_dir = chroma_dir.as_ref().join("electron");
-
-    if electron_dir.exists() {
-        Some(electron_dir)
-    } else {
-        None
-    }
-}
-
-fn get_path_hash<P>(path: P) -> String
-    where P: AsRef<Path> {
-    let pstr = path.as_ref().to_str().unwrap();
-    let mut hasher = Sha3_256::new();
-    hasher.update(pstr);
-    let result = hasher.finalize();
-    hex::encode(result)
-}
-
-fn get_flatpak_hash(id: &str) -> String {
-    let mut hasher = Sha3_256::new();
-    hasher.update("flatpak:".to_owned() + id);
-    let result = hasher.finalize();
-    hex::encode(result)
-}
-
-fn find_chrome_pak<P>(dir: P) -> Option<PathBuf>
-    where P: AsRef<Path>{
-    
-    for file in dir.as_ref().read_dir().unwrap() {
-        let file = file.unwrap();
-        let typ = file.file_type().unwrap();
-
-        if typ.is_file() {
-            if file.file_name() == "chrome_100_percent.pak" {
-                return Some(file.path());
-            }
-        } else if typ.is_dir() {
-            match find_chrome_pak(file.path()) {
-                Some(x) => return Some(x),
-                None => {},
-            }
-        }
-    }
-
-    None
-}
-
-fn get_flatpak_dir(id: &str) -> Option<PathBuf> {
-    let base = PathBuf::from(format!("/var/lib/flatpak/app/{}/current/active/files/", id));
-    if !base.exists() {
-        return None;
-    }
-
-    let chrome_pak = find_chrome_pak(&base).expect("Can't find Electron app.");
-    let dir = chrome_pak.parent().unwrap();
-    
-    Some(PathBuf::from(dir))
-}
-
-fn get_flatpak_replaced_file(id: &str) -> PathBuf {
-    let base = PathBuf::from(format!("/var/lib/flatpak/app/{}/current/active/files/", id));
-    let manifest_text = fs::read_to_string(base.join("manifest.json")).unwrap();
-    let manifest: Value = serde_json::from_str(&manifest_text).unwrap();
-
-    let command = manifest.get("command").unwrap().as_str().unwrap();
-    let wrapper = fs::read_to_string(base.join("bin/").join(command)).unwrap();
-    let mut tok = wrapper.split(" ");
-
-    while tok.next().unwrap() != "zypak-wrapper" {}
-    let replaced_relative = Path::new(tok.next().unwrap()).strip_prefix("/app/").unwrap();
-
-    base.join(replaced_relative)
 }
 
 fn main() {
